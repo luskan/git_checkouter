@@ -4,11 +4,11 @@ import subprocess
 import argparse
 from datetime import datetime, timedelta
 
-# Flag to decide whether to use script variables or CLI arguments
 # This is useful for debugging the script
 USE_SCRIPT_VARS = False
 
 # Script variables - these will be used if USE_SCRIPT_VARS is set to True
+# I used it for debugging purposes - like working inside IDE instead from command line
 specified_path_script = ""
 target_str_script = "09:26:2023 23:00"
 min_time_diff_script = timedelta(weeks=4)
@@ -21,7 +21,7 @@ create_branch_only_script = True
 
 # Global variables
 verbose_logging = False
-master_branch_name = "main"
+master_branch_name = "main" # it will be deduced later on in get_default_remote_branch
 
 def run_git_command(path, command):
     full_command = ['git', '-C', path] + command
@@ -36,6 +36,8 @@ def run_git_command(path, command):
         error_message = e.stderr.strip() if e.stderr else ""
         print(f"Error running git command {' '.join(full_command)} in {path}. Continuing to the next directory.")
 
+        # There are cases when git command was interruped leaving index.lock file, but there are more
+        # different lock fieles
         if "Unable to create" in error_message and "index.lock" in error_message:
             print("Git index.lock file exists, aborting script.")
             raise Exception("Git index.lock file exists, aborting.")
@@ -102,7 +104,6 @@ def delete_branches(path, prefix):
         for branch in existing_branches.split('\n'):
             if branch.strip().startswith(prefix):
                 run_git_command(path, ['branch', '-D', branch.strip()])
-
 
 def get_default_remote_branch(dir_path):
     # First, check if a remote is set
@@ -206,7 +207,7 @@ def main():
         except TypeError:
             print("Error: The target date-time is not specified correctly: '" + str(target_str) + "'")
             print("Example of a correct date-time format: 09:25:2021 12:45")
-            sys.exit(1)  # Stop the script
+            sys.exit(1)
 
         new_branch_name = prefix + target_date.strftime("%m_%d_%Y_%H_%M")
 
@@ -242,11 +243,11 @@ def main():
         try:
             if not dry_run and not create_branch_only:
                 run_git_command(dir_path, ['checkout', master_branch_name])
-                print(f"Checked out to master branch in {dir_name}")
+                print(f"Checed out to master branch in {dir_name}")
             else:
                 print(f"Would have checked out to master branch in {dir_name}")
         except subprocess.CalledProcessError:
-            print(f"Couldn't checkout to master in {dir_name}. Continuing with the next repository.")
+            print(f"Couldn't checkut to master in {dir_name}. Continuing with the next repository.")
             continue
 
         if delete_existing and not create_branch_only:
@@ -267,9 +268,9 @@ def main():
                 print(f"New branch {new_branch_name} created in {dir_name} without checkout.")
             else:
                 run_git_command(dir_path, ['checkout', '-b', new_branch_name, commit_hash])
-                print(f"Checked out to new branch {new_branch_name} in {dir_name}")
+                print(f"Chcked out to new branch {new_branch_name} in {dir_name}")
         else:
-            print(f"No suitable commit found in {dir_name} within the time range. Staying on the master branch.")
+            print(f"No sutable commit found in {dir_name} within the time range. Staying on the master branch.")
 
 
 if __name__ == "__main__":
