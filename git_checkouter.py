@@ -9,15 +9,15 @@ USE_SCRIPT_VARS = False
 
 # Script variables - these will be used if USE_SCRIPT_VARS is set to True
 # I used it for debugging purposes - like working inside IDE instead from command line
-specified_path_script = ""
-target_str_script = "09:26:2023 23:00"
+specified_path_script = r''
+target_str_script = "07:09:2024 23:00" # Month:Day:Year
 min_time_diff_script = timedelta(weeks=4)
 prefix_script = "tst_"
-delete_existing_script = True # deletes prefixed branch if exists
-ignore_repos_existing_script = [] # String array of repository names to ignore
+delete_existing_script = False # deletes prefixed branch if exists
+ignore_repos_existing_script = '' # String  of repository names to ignore
 verbose_logging_script = False
 dry_run_script = False
-create_branch_only_script = True
+create_branch_only_script = False
 
 # Global variables
 verbose_logging = False
@@ -137,6 +137,11 @@ def get_default_remote_branch(dir_path):
         return None
 
 def is_git_repo(dir_path, verbose_logging=False):
+    if not os.path.isdir(os.path.join(dir_path, '.git')):
+        if verbose_logging:
+            print(f"Skipping {dir_path}, not a git repository.")
+        return False
+
     try:
         output = subprocess.check_output(['git', 'rev-parse', '--is-inside-work-tree'], cwd=dir_path, text=True).strip()
         if output == 'true':
@@ -146,6 +151,12 @@ def is_git_repo(dir_path, verbose_logging=False):
         if verbose_logging:
             print(f"Skipping {dir_path}, not a git repository.")
         return False
+    except Exception as e:
+        # Catch all other exceptions
+        if verbose_logging:
+            print(f"An error occurred with {dir_path}: {e}")
+        return False
+
 def main():
     global master_branch_name
 
@@ -170,7 +181,7 @@ def main():
 
     args = parser.parse_args()
 
-    if len(sys.argv) == 1:
+    if len(sys.argv) == 1 and not USE_SCRIPT_VARS:
         parser.print_help(sys.stderr)
         sys.exit(1)
 
@@ -181,7 +192,7 @@ def main():
         min_time_diff = min_time_diff_script
         prefix = prefix_script
         delete_existing = delete_existing_script
-        ignore_repos = ignore_repos_existing_script
+        ignore_repos = [repo.strip().lower() for repo in ignore_repos_existing_script.split(",")] if ignore_repos_existing_script else []
         verbose_logging = verbose_logging_script
         dry_run = dry_run_script
         create_branch_only = create_branch_only_script
@@ -191,7 +202,7 @@ def main():
         min_time_diff = timedelta(days=args.timediff)
         prefix = args.prefix
         delete_existing = args.delete
-        ignore_repos = args.ignore_repos.split(",") if args.ignore_repos else []
+        ignore_repos = [repo.lower() for repo in args.ignore_repos.split(",")] if args.ignore_repos else []
         verbose_logging = args.verbose
         dry_run = args.dry_run
         create_branch_only = args.create_branch_only
@@ -214,7 +225,7 @@ def main():
     for dir_name in os.listdir(specified_path):
         dir_path = os.path.join(specified_path, dir_name)
 
-        if dir_name in ignore_repos:
+        if dir_name.lower() in ignore_repos:
             if verbose_logging:
                 print(f"Skipping {dir_name} as it's in the ignore list.")
             continue
