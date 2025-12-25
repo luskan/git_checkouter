@@ -15,6 +15,7 @@ min_time_diff_script = timedelta(weeks=4)
 prefix_script = "tst_"
 delete_existing_script = False # deletes prefixed branch if exists
 ignore_repos_existing_script = '' # String  of repository names to ignore
+repos_script = '' # String of repository names to include (whitelist, takes precedence over ignore)
 verbose_logging_script = False
 dry_run_script = False
 create_branch_only_script = False
@@ -161,8 +162,36 @@ def main():
     global master_branch_name
 
     # Handle command-line arguments
+    examples = """\
+Examples:
+  # Process all repos, create branch from commit nearest to date
+  python git_checkouter.py --path /repos --date "09:26:2023 23:00"
+
+  # Process only repo1 and repo2 (whitelist)
+  python git_checkouter.py --path /repos --date "09:26:2023 23:00" --repos "repo1,repo2"
+
+  # Process all except repo3 (blacklist)
+  python git_checkouter.py --path /repos --date "09:26:2023 23:00" --ignore-repos "repo3"
+
+  # When both specified, --repos wins (--ignore-repos ignored)
+  python git_checkouter.py --path /repos --date "09:26:2023 23:00" --repos "repo1" --ignore-repos "repo2"
+
+  # Custom prefix with 7-day lookback window
+  python git_checkouter.py --path /repos --date "09:26:2023 23:00" --timediff 7 --prefix "my_"
+
+  # Delete old prefixed branches before creating new ones
+  python git_checkouter.py --path /repos --date "09:26:2023 23:00" --delete
+
+  # Just checkout master/main and delete tst_* branches (no new branch created)
+  python git_checkouter.py --path /repos --delete
+
+  # Create branches without checkout (doesn't switch away from current branch)
+  python git_checkouter.py --path /repos --date "09:26:2023 23:00" --create-branch-only --verbose
+"""
     parser = argparse.ArgumentParser(
-        description="Checkout to a git branch based on a date."
+        description="Checkout to a git branch based on a date.",
+        epilog=examples,
+        formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
     parser.add_argument("--path", type=str, help="Specifies the folder where all your Git repositories are located.")
@@ -170,9 +199,11 @@ def main():
     parser.add_argument("--timediff", type=int, default=30, help="The minimum time difference, in days, for the closest commit.")
     parser.add_argument("--prefix", type=str, default="tst_",
                         help="The prefix for the new branch name. Default is 'tst_'.")
-    parser.add_argument("--delete", type=bool, default=True,
-                        help="Delete existing branches with the specified prefix. Default is True.")
+    parser.add_argument("--delete", action='store_true', default=False,
+                        help="Delete existing branches with the specified prefix before creating new ones.")
     parser.add_argument("--ignore-repos", type=str, help="Comma-separated list of repository names to ignore.",
+                        default="")
+    parser.add_argument("--repos", type=str, help="Comma-separated list of repository names to include (whitelist). When specified, --ignore-repos is ignored.",
                         default="")
     parser.add_argument("--verbose", action='store_true', default=False, help="Enable verbose logging.")
     parser.add_argument("--dry-run", action='store_true', default=False, help="Run the script without making any changes.")
@@ -192,7 +223,8 @@ def main():
         min_time_diff = min_time_diff_script
         prefix = prefix_script
         delete_existing = delete_existing_script
-        ignore_repos = [repo.strip().lower() for repo in ignore_repos_existing_script.split(",")] if ignore_repos_existing_script else []
+        ignore_repos = [repo.strip().lower() for repo in ignore_repos_existing_script.split(",") if repo.strip()] if ignore_repos_existing_script else []
+        repos = [repo.strip().lower() for repo in repos_script.split(",") if repo.strip()] if repos_script else []
         verbose_logging = verbose_logging_script
         dry_run = dry_run_script
         create_branch_only = create_branch_only_script
@@ -202,10 +234,25 @@ def main():
         min_time_diff = timedelta(days=args.timediff)
         prefix = args.prefix
         delete_existing = args.delete
-        ignore_repos = [repo.lower() for repo in args.ignore_repos.split(",")] if args.ignore_repos else []
+        ignore_repos = [repo.strip().lower() for repo in args.ignore_repos.split(",") if repo.strip()] if args.ignore_repos else []
+        repos = [repo.strip().lower() for repo in args.repos.split(",") if repo.strip()] if args.repos else []
         verbose_logging = args.verbose
         dry_run = args.dry_run
         create_branch_only = args.create_branch_only
+
+    # Validate required arguments
+    if not specified_path:
+        print("Error: --path is required.")
+        sys.exit(1)
+    if not os.path.isdir(specified_path):
+        print(f"Error: --path '{specified_path}' does not exist or is not a directory.")
+        sys.exit(1)
+
+    # Validate prefix when delete is enabled to prevent accidental deletion of all branches
+    if delete_existing:
+        if not prefix or len(prefix) < 2:
+            print("Error: --prefix must be at least 2 characters when using --delete to prevent accidental branch deletion.")
+            sys.exit(1)
 
     if dry_run:
         print("Dry-run mode enabled. No changes will be made.")
@@ -215,9 +262,9 @@ def main():
     if target_str != None:
         try:
             target_date = datetime.strptime(target_str, "%m:%d:%Y %H:%M")
-        except TypeError:
-            print("Error: The target date-time is not specified correctly: '" + str(target_str) + "'")
-            print("Example of a correct date-time format: 09:25:2021 12:45")
+        except (TypeError, ValueError):
+            print(f"Error: The target date-time is not specified correctly: '{target_str}'")
+            print("Expected format: MM:DD:YYYY HH:MM (e.g., 09:25:2021 12:45)")
             sys.exit(1)
 
         new_branch_name = prefix + target_date.strftime("%m_%d_%Y_%H_%M")
@@ -225,7 +272,13 @@ def main():
     for dir_name in os.listdir(specified_path):
         dir_path = os.path.join(specified_path, dir_name)
 
-        if dir_name.lower() in ignore_repos:
+        # Filter repos: whitelist (--repos) takes precedence over blacklist (--ignore-repos)
+        if repos:
+            if dir_name.lower() not in repos:
+                if verbose_logging:
+                    print(f"Skipping {dir_name} as it's not in the include list.")
+                continue
+        elif dir_name.lower() in ignore_repos:
             if verbose_logging:
                 print(f"Skipping {dir_name} as it's in the ignore list.")
             continue
@@ -254,15 +307,19 @@ def main():
         try:
             if not dry_run and not create_branch_only:
                 run_git_command(dir_path, ['checkout', master_branch_name])
-                print(f"Checed out to master branch in {dir_name}")
+                print(f"Checked out to master branch in {dir_name}")
             else:
                 print(f"Would have checked out to master branch in {dir_name}")
         except subprocess.CalledProcessError:
-            print(f"Couldn't checkut to master in {dir_name}. Continuing with the next repository.")
+            print(f"Couldn't checkout to master in {dir_name}. Continuing with the next repository.")
             continue
 
         if delete_existing and not create_branch_only:
-            delete_branches(dir_path, prefix)
+            if dry_run:
+                print(f"Would delete branches with prefix '{prefix}' in {dir_name}")
+            else:
+                delete_branches(dir_path, prefix)
+                print(f"Deleted branches with prefix '{prefix}' in {dir_name}")
 
         if target_date == None:
             continue
@@ -274,14 +331,16 @@ def main():
         commit_hash = nearest_commit(dir_path, target_date, min_time_diff)
 
         if commit_hash:
-            if create_branch_only:
+            if dry_run:
+                print(f"Would create branch {new_branch_name} from commit {commit_hash} in {dir_name}")
+            elif create_branch_only:
                 run_git_command(dir_path, ['branch', new_branch_name, commit_hash])
                 print(f"New branch {new_branch_name} created in {dir_name} without checkout.")
             else:
                 run_git_command(dir_path, ['checkout', '-b', new_branch_name, commit_hash])
-                print(f"Chcked out to new branch {new_branch_name} in {dir_name}")
+                print(f"Checked out to new branch {new_branch_name} in {dir_name}")
         else:
-            print(f"No sutable commit found in {dir_name} within the time range. Staying on the master branch.")
+            print(f"No suitable commit found in {dir_name} within the time range. Staying on the master branch.")
 
 
 if __name__ == "__main__":
